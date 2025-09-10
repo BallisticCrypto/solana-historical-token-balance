@@ -1,0 +1,67 @@
+!pip install requests python-dateutil --quiet
+
+import requests
+from dateutil import parser as dateparser
+from datetime import datetime, timezone
+
+# --- CONFIGURATION ---
+API_KEY = "YOUR_API_KEY_HERE"  # Replace this!
+WALLET = "3eURboCzqqs3UBALFKmKBB91gqTjnLTraUE5oNGtF7sH"
+TOKEN_MINT = "Es9vMFrzaCERcAqB5kWz3P3wS6B5sZQ6R9fL9h7bSyKk"  # USDC
+TARGET_DATE = "2024-08-01"  # Change to any YYYY-MM-DD
+
+# --- Convert date to timestamp ---
+target_timestamp = int(dateparser.parse(TARGET_DATE).replace(tzinfo=timezone.utc).timestamp())
+
+# --- Helius API URL ---
+BASE_URL = f"https://api.helius.xyz/v0/addresses/{WALLET}/transactions?api-key={API_KEY}"
+LIMIT = 1000
+
+# --- Fetch Transfers ---
+def fetch_all_transfers():
+    transfers = []
+    before = None
+
+    print(f"📦 Fetching transfers until {TARGET_DATE}...")
+
+    while True:
+        url = BASE_URL + f"&limit={LIMIT}"
+        if before:
+            url += f"&before={before}"
+
+        res = requests.get(url).json()
+        if not res:
+            break
+
+        for tx in res:
+            block_time = tx.get("timestamp")
+            if not block_time or block_time > target_timestamp:
+                continue  # too new, skip
+
+            for event in tx.get("tokenTransfers", []):
+                if event.get("mint") != TOKEN_MINT:
+                    continue
+                transfers.append(event)
+
+        if len(res) < LIMIT:
+            break  # no more
+        before = res[-1]["signature"]
+
+    return transfers
+
+# --- Process Transfers ---
+def compute_balance(transfers):
+    balance = 0
+    for t in transfers:
+        amt = int(t["amount"]) / 10**6  # Adjust for decimals
+        if t["toUserAccount"] == WALLET:
+            balance += amt
+        elif t["fromUserAccount"] == WALLET:
+            balance -= amt
+    return balance
+
+# --- Run ---
+txs = fetch_all_transfers()
+balance = compute_balance(txs)
+
+print(f"\n✅ Estimated {TOKEN_MINT} balance for {WALLET} on {TARGET_DATE}: {balance:.6f}")
